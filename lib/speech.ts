@@ -1,5 +1,6 @@
 import { SpeechClient } from '@google-cloud/speech';
 
+// Use the correct type from the Google Cloud library
 export const speechClient = new SpeechClient({
     projectId: process.env.GCP_PROJECT_ID,
     credentials: {
@@ -22,7 +23,31 @@ interface TranscriptionResult {
     message?: string;
 }
 
-export const transcribeAudio = async (gcsUri: string, audioFormat: string): Promise<TranscriptionResult> => {
+type AudioEncoding = 'LINEAR16' | 'FLAC' | 'MULAW' | 'AMR' | 'AMR_WB' | 'OGG_OPUS' | 'SPEEX_WITH_HEADER_BYTE' | 'MP3';
+
+const getAudioEncoding = (format: string): AudioEncoding => {
+    const formatLower = format.toLowerCase();
+    switch (formatLower) {
+        case 'mp3':
+            return 'MP3';
+        case 'wav':
+            return 'LINEAR16';
+        case 'mp4':
+            return 'MP3';
+        case 'flac':
+            return 'FLAC';
+        case 'ogg':
+            return 'OGG_OPUS';
+        default:
+            console.warn(`Unknown format ${format}, defaulting to MP3`);
+            return 'MP3';
+    }
+};
+
+export const transcribeAudio = async (
+    gcsUri: string,
+    audioFormat: string
+): Promise<TranscriptionResult> => {
     try {
         console.log('Transcribing audio:', { gcsUri, audioFormat });
 
@@ -30,21 +55,8 @@ export const transcribeAudio = async (gcsUri: string, audioFormat: string): Prom
             throw new Error(`Invalid GCS URI: ${gcsUri}`);
         }
 
-        const getEncoding = (format: string) => {
-            const formatLower = format.toLowerCase();
-            switch (formatLower) {
-                case 'mp3': return 'MP3' as const;
-                case 'wav': return 'LINEAR16' as const;
-                case 'mp4': return 'MP3' as const;
-                case 'flac': return 'FLAC' as const;
-                default:
-                    console.warn(`Unknown format ${format}, defaulting to MP3`);
-                    return 'MP3' as const;
-            }
-        };
-
         const config = {
-            encoding: getEncoding(audioFormat),
+            encoding: getAudioEncoding(audioFormat),
             sampleRateHertz: 16000,
             languageCode: 'si-LK',
             model: 'default',
@@ -56,7 +68,6 @@ export const transcribeAudio = async (gcsUri: string, audioFormat: string): Prom
         const audio = { uri: gcsUri };
 
         console.log('Speech API request config:', JSON.stringify({ config, audio }, null, 2));
-
         console.log('Using longRunningRecognize for transcription...');
 
         const [operation] = await speechClient.longRunningRecognize({
@@ -65,10 +76,9 @@ export const transcribeAudio = async (gcsUri: string, audioFormat: string): Prom
         });
 
         console.log('Operation started, waiting for results...');
-
         const [response] = await operation.promise();
 
-        console.log('Speech API response:', JSON.stringify(response, null, 2));
+        console.log('Speech API response received');
 
         if (!response.results || response.results.length === 0) {
             console.warn('No transcription results returned');
@@ -90,7 +100,7 @@ export const transcribeAudio = async (gcsUri: string, audioFormat: string): Prom
                 const confidence = result.alternatives[0].confidence || 0;
 
                 console.log(`Segment ${index + 1}:`, {
-                    transcript,
+                    transcript: transcript?.substring(0, 100) + '...',
                     confidence,
                 });
 
@@ -102,16 +112,16 @@ export const transcribeAudio = async (gcsUri: string, audioFormat: string): Prom
         });
 
         const fullTranscription = allTranscripts.join(' ');
-
         const averageConfidence = allConfidences.length > 0
             ? allConfidences.reduce((sum, conf) => sum + conf, 0) / allConfidences.length
             : 0;
 
-        const wordCount = fullTranscription.trim() ? fullTranscription.split(/\s+/).length : 0;
+        const wordCount = fullTranscription.trim()
+            ? fullTranscription.split(/\s+/).length
+            : 0;
 
         console.log('Full transcription result:', {
             segmentCount: allTranscripts.length,
-            fullTranscription,
             averageConfidence,
             totalCharacters: fullTranscription.length,
             totalWords: wordCount
@@ -131,21 +141,17 @@ export const transcribeAudio = async (gcsUri: string, audioFormat: string): Prom
             message: err.message,
             code: err.code,
             details: err.details,
-            stack: err.stack
         });
 
         if (err.code === 3) {
             throw new Error(`Invalid audio format or configuration: ${err.message}`);
         }
-
         if (err.code === 7) {
             throw new Error(`Permission denied: Check service account permissions - ${err.message}`);
         }
-
         if (err.code === 16) {
             throw new Error(`Authentication failed: Check Google Cloud credentials - ${err.message}`);
         }
-
         if (err.code === 4) {
             throw new Error(`Request timeout: The audio file might be too long - ${err.message}`);
         }

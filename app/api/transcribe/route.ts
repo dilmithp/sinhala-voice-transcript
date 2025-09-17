@@ -13,6 +13,8 @@ interface GoogleCloudError extends Error {
 }
 
 export async function POST(request: NextRequest) {
+    console.log('Transcribe API endpoint called');
+
     try {
         const body: TranscribeRequestBody = await request.json();
         const { gcsUri, audioFormat } = body;
@@ -21,20 +23,34 @@ export async function POST(request: NextRequest) {
 
         if (!gcsUri) {
             console.error('Missing GCS URI');
-            return NextResponse.json({ error: 'GCS URI required' }, { status: 400 });
+            return NextResponse.json(
+                { error: 'GCS URI required' },
+                { status: 400 }
+            );
+        }
+
+        if (!audioFormat) {
+            console.error('Missing audio format');
+            return NextResponse.json(
+                { error: 'Audio format required' },
+                { status: 400 }
+            );
         }
 
         // Validate environment variables
-        if (!process.env.GCP_PROJECT_ID || !process.env.GCS_CLIENT_EMAIL || !process.env.GCS_PRIVATE_KEY) {
-            console.error('Missing required environment variables');
+        const requiredEnvVars = ['GCP_PROJECT_ID', 'GCS_CLIENT_EMAIL', 'GCS_PRIVATE_KEY'];
+        const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+        if (missingEnvVars.length > 0) {
+            console.error('Missing environment variables:', missingEnvVars);
             return NextResponse.json({
-                error: 'Server configuration error: Missing Google Cloud credentials'
+                error: `Server configuration error: Missing ${missingEnvVars.join(', ')}`
             }, { status: 500 });
         }
 
         console.log('Starting transcription...');
         const result = await transcribeAudio(gcsUri, audioFormat);
-        console.log('Transcription result:', result);
+        console.log('Transcription completed successfully');
 
         return NextResponse.json({
             transcription: result.transcription,
@@ -49,11 +65,11 @@ export async function POST(request: NextRequest) {
 
         console.error('Transcription API error:', {
             message: gcError.message,
-            stack: gcError.stack,
             code: gcError.code,
-            details: gcError.details
+            details: gcError.details,
         });
 
+        // Return specific error messages based on error type
         if (gcError.message?.includes('authentication')) {
             return NextResponse.json({
                 error: 'Authentication failed. Check Google Cloud credentials.'
@@ -72,9 +88,15 @@ export async function POST(request: NextRequest) {
             }, { status: 404 });
         }
 
+        if (gcError.message?.includes('quota')) {
+            return NextResponse.json({
+                error: 'API quota exceeded. Please try again later.'
+            }, { status: 429 });
+        }
+
+        const errorMessage = gcError.message || 'Unknown error occurred';
         return NextResponse.json({
-            error: `Transcription failed: ${gcError.message}`,
-            details: process.env.NODE_ENV === 'development' ? gcError.stack : undefined
+            error: `Transcription failed: ${errorMessage}`
         }, { status: 500 });
     }
 }

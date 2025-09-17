@@ -3,7 +3,8 @@ import './globals.css';
 
 export const metadata: Metadata = {
     title: 'Sinhala Audio Transcription',
-    description: 'Convert Sinhala audio to text using Google Cloud Speech-to-Text',
+    description: 'Convert Sinhala audio files to text using Google Cloud Speech-to-Text API',
+    keywords: 'sinhala, transcription, speech-to-text, audio, google cloud',
 };
 
 export default function RootLayout({
@@ -13,7 +14,9 @@ export default function RootLayout({
 }) {
     return (
         <html lang="en">
-        <body>{children}</body>
+        <body className="antialiased">
+        {children}
+        </body>
         </html>
     );
 }
