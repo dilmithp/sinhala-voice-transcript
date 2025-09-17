@@ -13,6 +13,8 @@ interface TranscriptionResult {
     transcription: string;
     confidence: number;
     language: string;
+    segmentCount?: number;
+    totalWords?: number;
 }
 
 export default function AudioUploader() {
@@ -41,7 +43,6 @@ export default function AudioUploader() {
         setTranscription(null);
 
         try {
-            // Upload file
             console.log('Uploading file:', file.name);
             const formData = new FormData();
             formData.append('audio', file);
@@ -70,11 +71,9 @@ export default function AudioUploader() {
             setUploading(false);
             setTranscribing(true);
 
-            // Get file extension for audio format
             const audioFormat = file.name.split('.').pop()?.toLowerCase() || 'mp3';
             console.log('Starting transcription with format:', audioFormat);
 
-            // Transcribe audio
             const transcribeResponse = await fetch('/api/transcribe', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -119,7 +118,6 @@ export default function AudioUploader() {
                 Sinhala Audio Transcription
             </h2>
 
-            {/* File Input */}
             <div className="mb-6">
                 <input
                     ref={fileInputRef}
@@ -137,7 +135,6 @@ export default function AudioUploader() {
                 </button>
             </div>
 
-            {/* Upload Button */}
             {file && (
                 <div className="mb-6">
                     <button
@@ -146,13 +143,12 @@ export default function AudioUploader() {
                         className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors"
                     >
                         {uploading && 'Uploading...'}
-                        {transcribing && 'Transcribing...'}
+                        {transcribing && 'Transcribing... This may take a few minutes.'}
                         {!uploading && !transcribing && 'Upload & Transcribe'}
                     </button>
                 </div>
             )}
 
-            {/* Error Display */}
             {error && (
                 <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
                     <h3 className="font-semibold text-red-800 mb-2">Error Occurred:</h3>
@@ -160,25 +156,53 @@ export default function AudioUploader() {
                 </div>
             )}
 
-            {/* Transcription Result */}
             {transcription && (
                 <div className="bg-gray-50 p-4 rounded-lg">
                     <h3 className="font-semibold mb-2">Transcription Result:</h3>
-                    <p className="text-gray-800 leading-relaxed mb-3">
-                        {transcription.transcription || 'No speech detected in the audio file.'}
-                    </p>
-                    <div className="flex justify-between text-sm text-gray-600">
-                        <span>
-                            Confidence: {(transcription.confidence * 100).toFixed(1)}%
-                        </span>
-                        <span>
-                            Language: {transcription.language}
-                        </span>
+
+                    <div className="max-h-60 overflow-y-auto bg-white p-3 rounded border mb-3">
+                        <p className="text-gray-800 leading-relaxed whitespace-pre-wrap">
+                            {transcription.transcription || 'No speech detected in the audio file.'}
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600">
+                        <div>
+                            <span className="font-medium">Confidence:</span><br />
+                            {(transcription.confidence * 100).toFixed(1)}%
+                        </div>
+                        <div>
+                            <span className="font-medium">Language:</span><br />
+                            {transcription.language}
+                        </div>
+                        {transcription.segmentCount && (
+                            <div>
+                                <span className="font-medium">Segments:</span><br />
+                                {transcription.segmentCount}
+                            </div>
+                        )}
+                        {transcription.totalWords && (
+                            <div>
+                                <span className="font-medium">Word Count:</span><br />
+                                {transcription.totalWords}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="mt-3">
+                        <button
+                            onClick={() => {
+                                navigator.clipboard.writeText(transcription.transcription);
+                                alert('Transcription copied to clipboard!');
+                            }}
+                            className="bg-blue-500 text-white px-4 py-2 rounded text-sm hover:bg-blue-600 transition-colors"
+                        >
+                            Copy Text
+                        </button>
                     </div>
                 </div>
             )}
 
-            {/* File Info */}
             {file && (
                 <div className="mt-4 text-sm text-gray-500">
                     <p>Selected file: {file.name}</p>

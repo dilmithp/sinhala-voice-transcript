@@ -50,14 +50,13 @@ export const transcribeAudio = async (gcsUri: string, audioFormat: string): Prom
             model: 'default',
             enableAutomaticPunctuation: true,
             enableWordTimeOffsets: false,
-            maxAlternatives: 1, // We only need the best alternative
+            maxAlternatives: 1,
         };
 
         const audio = { uri: gcsUri };
 
         console.log('Speech API request config:', JSON.stringify({ config, audio }, null, 2));
 
-        // Use longRunningRecognize for all files to avoid duration limits
         console.log('Using longRunningRecognize for transcription...');
 
         const [operation] = await speechClient.longRunningRecognize({
@@ -67,7 +66,6 @@ export const transcribeAudio = async (gcsUri: string, audioFormat: string): Prom
 
         console.log('Operation started, waiting for results...');
 
-        // Wait for the operation to complete
         const [response] = await operation.promise();
 
         console.log('Speech API response:', JSON.stringify(response, null, 2));
@@ -83,7 +81,6 @@ export const transcribeAudio = async (gcsUri: string, audioFormat: string): Prom
             };
         }
 
-        // IMPORTANT: Concatenate ALL results to get the full transcript
         const allTranscripts: string[] = [];
         const allConfidences: number[] = [];
 
@@ -95,7 +92,6 @@ export const transcribeAudio = async (gcsUri: string, audioFormat: string): Prom
                 console.log(`Segment ${index + 1}:`, {
                     transcript,
                     confidence,
-                    // Remove isFinal reference since it's not available in ISpeechRecognitionResult
                 });
 
                 if (transcript) {
@@ -105,10 +101,8 @@ export const transcribeAudio = async (gcsUri: string, audioFormat: string): Prom
             }
         });
 
-        // Join all transcript segments with spaces
         const fullTranscription = allTranscripts.join(' ');
 
-        // Calculate average confidence across all segments
         const averageConfidence = allConfidences.length > 0
             ? allConfidences.reduce((sum, conf) => sum + conf, 0) / allConfidences.length
             : 0;
@@ -140,20 +134,19 @@ export const transcribeAudio = async (gcsUri: string, audioFormat: string): Prom
             stack: err.stack
         });
 
-        // Handle specific Google Cloud errors
-        if (err.code === 3) { // INVALID_ARGUMENT
+        if (err.code === 3) {
             throw new Error(`Invalid audio format or configuration: ${err.message}`);
         }
 
-        if (err.code === 7) { // PERMISSION_DENIED
+        if (err.code === 7) {
             throw new Error(`Permission denied: Check service account permissions - ${err.message}`);
         }
 
-        if (err.code === 16) { // UNAUTHENTICATED
+        if (err.code === 16) {
             throw new Error(`Authentication failed: Check Google Cloud credentials - ${err.message}`);
         }
 
-        if (err.code === 4) { // DEADLINE_EXCEEDED
+        if (err.code === 4) {
             throw new Error(`Request timeout: The audio file might be too long - ${err.message}`);
         }
 

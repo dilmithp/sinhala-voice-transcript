@@ -54,7 +54,6 @@ export async function POST(request: NextRequest) {
             details: gcError.details
         });
 
-        // Return specific error messages based on error type
         if (gcError.message?.includes('authentication')) {
             return NextResponse.json({
                 error: 'Authentication failed. Check Google Cloud credentials.'

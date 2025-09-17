@@ -10,7 +10,7 @@ const storage = new Storage({
 
 const bucket = storage.bucket(process.env.GCS_BUCKET_NAME as string);
 
-export const uploadToGCS = async (file: Buffer, fileName: string, contentType: string) => {
+export const uploadToGCS = async (file: Buffer, fileName: string, contentType: string): Promise<string> => {
     const blob = bucket.file(fileName);
     const stream = blob.createWriteStream({
         metadata: { contentType },
