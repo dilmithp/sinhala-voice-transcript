@@ -22,29 +22,26 @@ export async function POST(request: NextRequest) {
             size: file.size
         });
 
-        // Validate file type
+        // Updated file type validation with better WAV support
         const allowedTypes = [
-            'audio/mpeg',
-            'audio/mp3',
-            'audio/mp4',
-            'audio/wav',
-            'video/mp4'
+            'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/wav', 'audio/wave',
+            'video/mp4', 'audio/webm', 'audio/m4a', 'audio/ogg', 'audio/flac'
         ];
 
         if (!allowedTypes.includes(file.type)) {
             console.error('Invalid file type:', file.type);
             return NextResponse.json(
-                { error: `Invalid file type: ${file.type}` },
+                { error: `Invalid file type: ${file.type}. Supported: MP3, MP4, WAV, M4A, FLAC, OGG, WebM` },
                 { status: 400 }
             );
         }
 
-        // Validate file size (50MB limit)
-        const maxSize = 50 * 1024 * 1024; // 50MB in bytes
+        // Updated file size validation - 100MB limit
+        const maxSize = 100 * 1024 * 1024; // 100MB in bytes
         if (file.size > maxSize) {
             console.error('File too large:', file.size);
             return NextResponse.json(
-                { error: 'File size too large. Maximum 50MB allowed.' },
+                { error: 'File size too large. Maximum 100MB allowed.' },
                 { status: 400 }
             );
         }

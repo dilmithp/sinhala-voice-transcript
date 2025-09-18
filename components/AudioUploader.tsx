@@ -16,9 +16,13 @@ interface TranscriptionResult {
     language: string;
     segmentCount?: number;
     totalWords?: number;
+    service?: 'google' | 'openai';
 }
 
+type ServiceTab = 'google' | 'openai';
+
 export default function AudioUploader() {
+    const [activeTab, setActiveTab] = useState<ServiceTab>('google');
     const [file, setFile] = useState<File | null>(null);
     const [uploading, setUploading] = useState(false);
     const [transcribing, setTranscribing] = useState(false);
@@ -27,20 +31,33 @@ export default function AudioUploader() {
     const [uploadProgress, setUploadProgress] = useState<string>('');
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    const handleTabChange = (tab: ServiceTab) => {
+        setActiveTab(tab);
+        setTranscription(null);
+        setError(null);
+        setUploadProgress('');
+    };
+
     const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
         const selectedFile = event.target.files?.[0];
         if (selectedFile) {
-            // Validate file size (50MB limit)
-            const maxSize = 50 * 1024 * 1024; // 50MB
+            // Updated file size limits - 100MB for Google Cloud, 25MB for OpenAI
+            const maxSize = activeTab === 'openai' ? 25 * 1024 * 1024 : 100 * 1024 * 1024;
+            const maxSizeLabel = activeTab === 'openai' ? '25MB' : '100MB';
+
             if (selectedFile.size > maxSize) {
-                setError('File size too large. Maximum 50MB allowed.');
+                setError(`File size too large. Maximum ${maxSizeLabel} allowed for ${activeTab === 'openai' ? 'OpenAI Whisper' : 'Google Cloud'}.`);
                 return;
             }
 
-            // Validate file type
-            const allowedTypes = ['audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/wav', 'video/mp4'];
+            // Updated supported file types with better WAV support
+            const allowedTypes = [
+                'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/wav', 'audio/wave',
+                'video/mp4', 'audio/webm', 'audio/m4a', 'audio/ogg', 'audio/flac'
+            ];
+
             if (!allowedTypes.includes(selectedFile.type)) {
-                setError(`Invalid file type: ${selectedFile.type}. Please use MP3, MP4, or WAV files.`);
+                setError(`Invalid file type: ${selectedFile.type}. Supported formats: MP3, MP4, WAV, M4A, FLAC, OGG, WebM`);
                 return;
             }
 
@@ -61,73 +78,11 @@ export default function AudioUploader() {
         setUploadProgress('Preparing file for upload...');
 
         try {
-            // Upload file
-            console.log('Starting upload for file:', file.name);
-            setUploadProgress('Uploading file to cloud storage...');
-
-            const formData = new FormData();
-            formData.append('audio', file);
-
-            const uploadResponse = await fetch('/api/upload', {
-                method: 'POST',
-                body: formData,
-            });
-
-            const uploadData = await uploadResponse.text();
-            console.log('Upload response received');
-
-            if (!uploadResponse.ok) {
-                let errorData;
-                try {
-                    errorData = uploadData ? JSON.parse(uploadData) : { error: 'Upload failed' };
-                } catch {
-                    errorData = { error: `Upload failed with status: ${uploadResponse.status}` };
-                }
-                throw new Error(errorData.error);
+            if (activeTab === 'google') {
+                await handleGoogleTranscription();
+            } else {
+                await handleOpenAITranscription();
             }
-
-            const uploadResult: UploadResult = JSON.parse(uploadData);
-            console.log('Upload successful:', {
-                fileName: uploadResult.fileName,
-                size: uploadResult.size
-            });
-
-            setUploading(false);
-            setTranscribing(true);
-            setUploadProgress('Processing audio for transcription...');
-
-            // Get file extension for audio format
-            const audioFormat = file.name.split('.').pop()?.toLowerCase() || 'mp3';
-            console.log('Starting transcription with format:', audioFormat);
-
-            // Transcribe audio
-            const transcribeResponse = await fetch('/api/transcribe', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    gcsUri: uploadResult.gcsUri,
-                    audioFormat,
-                }),
-            });
-
-            const transcribeData = await transcribeResponse.text();
-            console.log('Transcription response received');
-
-            if (!transcribeResponse.ok) {
-                let errorData;
-                try {
-                    errorData = transcribeData ? JSON.parse(transcribeData) : { error: 'Transcription failed' };
-                } catch {
-                    errorData = { error: `Transcription failed with status: ${transcribeResponse.status}` };
-                }
-                throw new Error(errorData.error);
-            }
-
-            const transcriptionResult: TranscriptionResult = JSON.parse(transcribeData);
-            console.log('Transcription completed successfully');
-            setTranscription(transcriptionResult);
-            setUploadProgress('');
-
         } catch (error: unknown) {
             console.error('Process failed:', error);
             const errorMessage = error instanceof Error
@@ -141,6 +96,102 @@ export default function AudioUploader() {
         }
     };
 
+    const handleGoogleTranscription = async () => {
+        if (!file) return;
+
+        setUploadProgress('Uploading file to Google Cloud Storage...');
+
+        const formData = new FormData();
+        formData.append('audio', file);
+
+        const uploadResponse = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData,
+        });
+
+        const uploadData = await uploadResponse.text();
+
+        if (!uploadResponse.ok) {
+            let errorData;
+            try {
+                errorData = uploadData ? JSON.parse(uploadData) : { error: 'Upload failed' };
+            } catch {
+                errorData = { error: `Upload failed with status: ${uploadResponse.status}` };
+            }
+            throw new Error(errorData.error);
+        }
+
+        const uploadResult: UploadResult = JSON.parse(uploadData);
+        console.log('Google Cloud upload successful');
+
+        setUploading(false);
+        setTranscribing(true);
+        setUploadProgress('Processing audio with Google Speech-to-Text...');
+
+        const audioFormat = file.name.split('.').pop()?.toLowerCase() || 'mp3';
+
+        const transcribeResponse = await fetch('/api/transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                gcsUri: uploadResult.gcsUri,
+                audioFormat,
+            }),
+        });
+
+        const transcribeData = await transcribeResponse.text();
+
+        if (!transcribeResponse.ok) {
+            let errorData;
+            try {
+                errorData = transcribeData ? JSON.parse(transcribeData) : { error: 'Transcription failed' };
+            } catch {
+                errorData = { error: `Transcription failed with status: ${transcribeResponse.status}` };
+            }
+            throw new Error(errorData.error);
+        }
+
+        const transcriptionResult: TranscriptionResult = JSON.parse(transcribeData);
+        transcriptionResult.service = 'google';
+        setTranscription(transcriptionResult);
+        setUploadProgress('');
+    };
+
+    const handleOpenAITranscription = async () => {
+        if (!file) return;
+
+        setUploading(false);
+        setTranscribing(true);
+        setUploadProgress('Processing audio with OpenAI Whisper...');
+
+        const formData = new FormData();
+        formData.append('audio', file);
+        // Remove the language parameter - let Whisper auto-detect
+
+        const transcribeResponse = await fetch('/api/whisper', {
+            method: 'POST',
+            body: formData,
+        });
+
+        const transcribeData = await transcribeResponse.text();
+
+        if (!transcribeResponse.ok) {
+            let errorData;
+            try {
+                errorData = transcribeData ? JSON.parse(transcribeData) : { error: 'Transcription failed' };
+            } catch {
+                errorData = { error: `Transcription failed with status: ${transcribeResponse.status}` };
+            }
+            throw new Error(errorData.error);
+        }
+
+        const transcriptionResult: TranscriptionResult = JSON.parse(transcribeData);
+        transcriptionResult.service = 'openai';
+        setTranscription(transcriptionResult);
+        setUploadProgress('');
+    };
+
+
     const copyToClipboard = async () => {
         if (transcription?.transcription) {
             try {
@@ -148,7 +199,6 @@ export default function AudioUploader() {
                 alert('Transcription copied to clipboard!');
             } catch (err) {
                 console.error('Failed to copy text: ', err);
-                // Fallback for older browsers
                 const textArea = document.createElement('textarea');
                 textArea.value = transcription.transcription;
                 document.body.appendChild(textArea);
@@ -170,6 +220,9 @@ export default function AudioUploader() {
         }
     };
 
+    const getMaxFileSize = () => activeTab === 'openai' ? '25MB' : '100MB';
+    const getServiceName = () => activeTab === 'openai' ? 'OpenAI Whisper' : 'Google Cloud Speech-to-Text';
+
     return (
         <div className="max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-lg">
             <div className="text-center mb-8">
@@ -177,8 +230,47 @@ export default function AudioUploader() {
                     Sinhala Audio Transcription
                 </h1>
                 <p className="text-gray-600">
-                    Upload your Sinhala audio files and get accurate transcriptions using Google Cloud Speech-to-Text
+                    Upload your Sinhala audio files and get accurate transcriptions
                 </p>
+            </div>
+
+            {/* Service Selection Tabs */}
+            <div className="mb-6">
+                <div className="flex border-b border-gray-200">
+                    <button
+                        onClick={() => handleTabChange('google')}
+                        className={`py-2 px-4 text-sm font-medium border-b-2 transition-colors ${
+                            activeTab === 'google'
+                                ? 'border-blue-500 text-blue-600'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                        }`}
+                    >
+                        🎯 Google Cloud Speech-to-Text
+                    </button>
+                    <button
+                        onClick={() => handleTabChange('openai')}
+                        className={`py-2 px-4 text-sm font-medium border-b-2 transition-colors ${
+                            activeTab === 'openai'
+                                ? 'border-green-500 text-green-600'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                        }`}
+                    >
+                        🤖 OpenAI Whisper
+                    </button>
+                </div>
+
+                {/* Service Description */}
+                <div className="mt-3 p-3 rounded-lg bg-gray-50">
+                    {activeTab === 'google' ? (
+                        <div className="text-sm text-gray-600">
+                            <strong>Google Cloud Speech-to-Text:</strong> Advanced speech recognition optimized for Sinhala language with confidence scores and detailed analytics. Supports files up to 100MB.
+                        </div>
+                    ) : (
+                        <div className="text-sm text-gray-600">
+                            {/*<strong>OpenAI Whisper:</strong> State-of-the-art speech recognition model with excellent multilingual support including Sinhala. Supports files up to 25MB.*/}
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* File Input Section */}
@@ -186,29 +278,39 @@ export default function AudioUploader() {
                 <input
                     ref={fileInputRef}
                     type="file"
-                    accept="audio/mp3,audio/mpeg,audio/wav,audio/mp4,video/mp4"
+                    accept="audio/mp3,audio/mpeg,audio/wav,audio/wave,audio/mp4,video/mp4,audio/m4a,audio/flac,audio/ogg,audio/webm"
                     onChange={handleFileSelect}
                     className="hidden"
                 />
 
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-500 transition-colors">
+                <div className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                    activeTab === 'google'
+                        ? 'border-blue-300 hover:border-blue-500'
+                        : 'border-green-300 hover:border-green-500'
+                }`}>
                     <button
                         onClick={() => fileInputRef.current?.click()}
                         className="w-full p-4 text-gray-600 hover:text-blue-600 transition-colors"
                     >
-                        <div className="text-4xl mb-2">📁</div>
+                        <div className="text-4xl mb-2">🎵</div>
                         {file ? (
                             <div>
                                 <p className="font-medium text-gray-800">{file.name}</p>
                                 <p className="text-sm text-gray-500">
                                     {(file.size / 1024 / 1024).toFixed(2)} MB • {file.type}
                                 </p>
+                                <p className="text-xs text-gray-400 mt-1">
+                                    Will be processed with {getServiceName()}
+                                </p>
                             </div>
                         ) : (
                             <div>
                                 <p className="text-lg font-medium mb-2">Choose Audio File</p>
                                 <p className="text-sm text-gray-500">
-                                    Supported formats: MP3, MP4, WAV (Max 50MB)
+                                    Supported: MP3, MP4, WAV, M4A, FLAC, OGG, WebM (Max {getMaxFileSize()})
+                                </p>
+                                <p className="text-xs text-gray-400 mt-2">
+                                    Selected service: {getServiceName()}
                                 </p>
                             </div>
                         )}
@@ -222,11 +324,15 @@ export default function AudioUploader() {
                     <button
                         onClick={handleUploadAndTranscribe}
                         disabled={uploading || transcribing}
-                        className="flex-1 bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors font-medium"
+                        className={`flex-1 text-white py-3 px-6 rounded-lg font-medium transition-colors ${
+                            activeTab === 'google'
+                                ? 'bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400'
+                                : 'bg-green-600 hover:bg-green-700 disabled:bg-gray-400'
+                        }`}
                     >
                         {uploading && '⏫ Uploading...'}
-                        {transcribing && '🎵 Transcribing...'}
-                        {!uploading && !transcribing && '🚀 Upload & Transcribe'}
+                        {transcribing && `🎵 Transcribing with ${activeTab === 'google' ? 'Google' : 'Whisper'}...`}
+                        {!uploading && !transcribing && `🚀 Transcribe with ${activeTab === 'google' ? 'Google' : 'Whisper'}`}
                     </button>
 
                     <button
@@ -241,11 +347,17 @@ export default function AudioUploader() {
 
             {/* Progress Indicator */}
             {(uploading || transcribing) && (
-                <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className={`mb-6 border rounded-lg p-4 ${
+                    activeTab === 'google'
+                        ? 'bg-blue-50 border-blue-200'
+                        : 'bg-green-50 border-green-200'
+                }`}>
                     <div className="flex items-center justify-center">
-                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 mr-3"></div>
-                        <span className="text-blue-800">
-                            {uploadProgress || (transcribing ? 'Transcribing audio... This may take a few minutes for longer files.' : 'Processing...')}
+                        <div className={`animate-spin rounded-full h-5 w-5 border-b-2 mr-3 ${
+                            activeTab === 'google' ? 'border-blue-600' : 'border-green-600'
+                        }`}></div>
+                        <span className={activeTab === 'google' ? 'text-blue-800' : 'text-green-800'}>
+                            {uploadProgress || (transcribing ? 'Transcribing audio... This may take several minutes for larger files.' : 'Processing...')}
                         </span>
                     </div>
                 </div>
@@ -268,7 +380,16 @@ export default function AudioUploader() {
             {transcription && (
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
                     <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-semibold text-gray-800">Transcription Result</h3>
+                        <div className="flex items-center gap-2">
+                            <h3 className="text-lg font-semibold text-gray-800">Transcription Result</h3>
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                transcription.service === 'google'
+                                    ? 'bg-blue-100 text-blue-800'
+                                    : 'bg-green-100 text-green-800'
+                            }`}>
+                                {transcription.service === 'google' ? 'Google Cloud' : 'OpenAI Whisper'}
+                            </span>
+                        </div>
                         <button
                             onClick={copyToClipboard}
                             className="bg-blue-500 text-white px-4 py-2 rounded text-sm hover:bg-blue-600 transition-colors flex items-center gap-2"
@@ -286,17 +407,19 @@ export default function AudioUploader() {
 
                     {/* Statistics Grid */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                        <div className="bg-white p-3 rounded border">
-                            <span className="font-medium text-gray-600">Confidence:</span>
-                            <div className="text-lg font-semibold text-gray-800">
-                                {(transcription.confidence * 100).toFixed(1)}%
+                        {transcription.confidence !== undefined && (
+                            <div className="bg-white p-3 rounded border">
+                                <span className="font-medium text-gray-600">Confidence:</span>
+                                <div className="text-lg font-semibold text-gray-800">
+                                    {(transcription.confidence * 100).toFixed(1)}%
+                                </div>
                             </div>
-                        </div>
+                        )}
 
                         <div className="bg-white p-3 rounded border">
                             <span className="font-medium text-gray-600">Language:</span>
                             <div className="text-lg font-semibold text-gray-800">
-                                {transcription.language}
+                                {transcription.language || 'Sinhala'}
                             </div>
                         </div>
 
@@ -325,7 +448,7 @@ export default function AudioUploader() {
             <div className="mt-8 text-center text-sm text-gray-500">
                 <p>
                     💡 <strong>Tips:</strong> For best results, use clear audio with minimal background noise.
-                    Longer files may take several minutes to process.
+                    WAV files provide the highest quality. Larger files (up to 100MB) may take several minutes to process.
                 </p>
             </div>
         </div>
