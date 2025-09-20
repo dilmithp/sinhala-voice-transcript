@@ -4,6 +4,7 @@ import { transcribeAudio } from '../../../lib/speech';
 interface TranscribeRequestBody {
     gcsUri: string;
     audioFormat: string;
+    languageMode?: 'sinhala' | 'english' | 'mixed';
 }
 
 interface GoogleCloudError extends Error {
@@ -17,9 +18,9 @@ export async function POST(request: NextRequest) {
 
     try {
         const body: TranscribeRequestBody = await request.json();
-        const { gcsUri, audioFormat } = body;
+        const { gcsUri, audioFormat, languageMode = 'mixed' } = body;
 
-        console.log('Transcribe request:', { gcsUri, audioFormat });
+        console.log('Transcribe request:', { gcsUri, audioFormat, languageMode });
 
         if (!gcsUri) {
             console.error('Missing GCS URI');
@@ -48,16 +49,18 @@ export async function POST(request: NextRequest) {
             }, { status: 500 });
         }
 
-        console.log('Starting transcription...');
-        const result = await transcribeAudio(gcsUri, audioFormat);
+        console.log(`Starting transcription in ${languageMode} mode...`);
+        const result = await transcribeAudio(gcsUri, audioFormat, languageMode);
         console.log('Transcription completed successfully');
 
         return NextResponse.json({
             transcription: result.transcription,
             confidence: result.confidence,
-            language: 'si-LK',
+            language: result.primaryLanguage || (languageMode === 'sinhala' ? 'si-LK' : languageMode === 'english' ? 'en-US' : 'mixed'),
             segmentCount: result.segmentCount,
-            totalWords: result.totalWords
+            totalWords: result.totalWords,
+            detectedLanguages: result.detectedLanguages,
+            primaryLanguage: result.primaryLanguage
         });
 
     } catch (error: unknown) {
@@ -69,7 +72,7 @@ export async function POST(request: NextRequest) {
             details: gcError.details,
         });
 
-        // Return specific error messages based on error type
+        // Return specific error messages
         if (gcError.message?.includes('authentication')) {
             return NextResponse.json({
                 error: 'Authentication failed. Check Google Cloud credentials.'
